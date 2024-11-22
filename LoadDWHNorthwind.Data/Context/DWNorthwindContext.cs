@@ -16,5 +16,6 @@ namespace LoadDWHNorthwind.Data.Context
         public DbSet<DimProduct> DimProducts { get; set; }
         public DbSet<DimShipper> DimShippers { get; set; }
         public DbSet<DimCustomer> DimCustomers { get; set; }
-            }
+        #endregion
+    }
 }

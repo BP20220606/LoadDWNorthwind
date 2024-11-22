@@ -5,7 +5,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace LoadDWHNorthwind.Data.Entities.DWNorthwind
 {
-    [Table("DimProducts")]
+    [Table("DimProducts", Schema = "DWH")]
     public class DimProduct
     {
         [Key]
