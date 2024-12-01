@@ -9,8 +9,8 @@ namespace LoadDWHNorthwind.Data.Entities.DWNorthwind
     public class DimCustomer
     {
         [Key]
-        public string? CustomerKey { get; set; }
-        public string? CustomerID { get; set; }
+        public int CustomerKey { get; set; }
+        public string CustomerID { get; set; }
         public string? CustomerName { get; set; }
         public string? Country { get; set; }
 

@@ -27,12 +27,14 @@ namespace LoadDWHNorthwind.Data.Services
             try
             {
 
-                await LoadDimEmployee();
+                await LimpiarDatos();
+                await LoadDimDates();
                 await LoadDimProduct();
                 await LoadDimCustomers();
+                await LoadDimEmployee();
                 await LoadDimShippers();
-                //await LoadFactSales();
-                //await LoadFactCustomerServed();
+                await LoadFactOrders();
+                await LoadFactCustomerServed();
 
 
             }
@@ -40,10 +42,30 @@ namespace LoadDWHNorthwind.Data.Services
             {
 
                 result.Success = false;
-                result.Message = $"Error cargando el DWH Ventas. {ex.Message}";
+                result.Message = $"Error cargando el DWH Northwind. {ex.Message}";
             }
 
             return result;
+        }
+
+        private async Task LimpiarDatos()
+        {
+            try
+            {
+                // Eliminar todas las filas de las tablas de dimensiones y hechos utilizando ExecuteDeleteAsync
+                await _dwnorthwindContext.FactOrders.ExecuteDeleteAsync();
+                await _dwnorthwindContext.FactCustomersServed.ExecuteDeleteAsync();
+                await _dwnorthwindContext.DimEmployees.ExecuteDeleteAsync();
+                await _dwnorthwindContext.DimProducts.ExecuteDeleteAsync();
+                await _dwnorthwindContext.DimShippers.ExecuteDeleteAsync();
+                await _dwnorthwindContext.DimCustomers.ExecuteDeleteAsync();
+                await _dwnorthwindContext.DimDates.ExecuteDeleteAsync();
+
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Error al eliminar datos del DWH Northwind: {ex.Message}");
+            }
         }
 
         private async Task<OperationResult> LoadDimEmployee()
@@ -55,10 +77,11 @@ namespace LoadDWHNorthwind.Data.Services
                 var employees = await _northwindContext.Employees.AsNoTracking().Select(emp => new DimEmployee()
                 {
                     EmployeeID = emp.EmployeeID,
-                    EmployeeName = string.Concat(emp.FirstName, " ", emp.LastName)
+                    EmployeeName = string.Concat(emp.FirstName, " ", emp.LastName),
+                    EmployeeTitle = emp.Title
                 }).ToListAsync();
 
-                int[] employeeIds = employees.Select(emp => emp.EmployeeKey).ToArray();
+                int[] employeeIds = employees.Select(emp => emp.EmployeeID).ToArray();
 
                 await _dwnorthwindContext.DimEmployees.Where(cd => employeeIds.Contains(cd.EmployeeID))
                                                 .AsNoTracking()
@@ -87,13 +110,14 @@ namespace LoadDWHNorthwind.Data.Services
             {
 
                 var productCategories = await (from product in _northwindContext.Products
-                                               join category in _northwindContext.Categories on product.CategoryID equals category.CategoryID
+                                               join category in _northwindContext.Categories on product.CategoryId equals category.CategoryID
                                                select new DimProduct()
                                                {
-                                                   CategoryID = category.CategoryID,
+                                                   ProductID = product.ProductId,
                                                    ProductName = product.ProductName,
-                                                   CategoryName = category.CategoryName,
-                                                   ProductKey = product.ProductID
+                                                   CategoryID = category.CategoryID,
+                                                   CategoryName = category.CategoryName
+
                                                }).AsNoTracking().ToListAsync();
 
 
@@ -114,7 +138,7 @@ namespace LoadDWHNorthwind.Data.Services
             catch (Exception ex)
             {
                 result.Success = false;
-                result.Message = $"Error cargando la dimension de producto y categoria. {ex.Message}";
+                result.Message = $"Error cargando la dimension de producto. {ex.Message}";
             }
             return result;
         }
@@ -130,7 +154,8 @@ namespace LoadDWHNorthwind.Data.Services
                 var customers = await _northwindContext.Customers.Select(cust => new DimCustomer()
                 {
                     CustomerID = cust.CustomerID,
-                    CustomerName = cust.CompanyName
+                    CustomerName = cust.CompanyName,
+                    Country = cust.Country
 
                 }).AsNoTracking()
                   .ToListAsync();
@@ -138,9 +163,6 @@ namespace LoadDWHNorthwind.Data.Services
 
                 string[] customersIds = customers.Select(cust => cust.CustomerID).ToArray();
 
-                await _dwnorthwindContext.DimCustomers.Where(cust => customersIds.Contains(cust.CustomerKey))
-                                          .AsNoTracking()
-                                          .ExecuteDeleteAsync();
 
                 await _dwnorthwindContext.DimCustomers.AddRangeAsync(customers);
                 await _dwnorthwindContext.SaveChangesAsync();
@@ -160,26 +182,19 @@ namespace LoadDWHNorthwind.Data.Services
 
             try
             {
-                // Obtener shippers de la base de datos de origen y mapear a DimShipper
                 var shippers = await _northwindContext.Shippers.AsNoTracking().Select(ship => new DimShipper()
                 {
                     ShipperID = ship.ShipperID,
                     ShipperName = ship.CompanyName
                 }).ToListAsync();
 
-                // Obtener los IDs de los shippers como array de enteros
+            
                 int[] shipperIds = shippers.Select(ship => ship.ShipperID).ToArray();
 
-                // Borrar registros existentes en DWNorthwind con esos IDs
-                await _dwnorthwindContext.DimShippers
-                    .Where(cd => shipperIds.Contains(cd.ShipperID))
-                    .AsNoTracking()
-                    .ExecuteDeleteAsync();
-
-                // Agregar nuevos registros a DWNorthwind
+               
                 await _dwnorthwindContext.DimShippers.AddRangeAsync(shippers);
 
-                // Guardar cambios en DWNorthwind
+             
                 await _dwnorthwindContext.SaveChangesAsync();
             }
             catch (Exception ex)
@@ -190,111 +205,189 @@ namespace LoadDWHNorthwind.Data.Services
 
             return result;
         }
-        //private async Task<OperationResult> LoadFactSales()
-        //{
-        //    OperationResult result = new OperationResult();
 
-        //    try
-        //    {
-        //        var ventas = await _northwindContext.Vwventas.AsNoTracking().ToListAsync();
+        private async Task<OperationResult> LoadDimDates()
+         {
+            var resultado = new OperationResult { Success = true };
+
+            try
+            {
+               
+                var fechas = await _northwindContext.Orders.AsNoTracking()
+                    .Select(order => new DimDate
+                    {
+                        
+                        Date = order.OrderDate ?? DateTime.MinValue,
+                        Year = order.OrderDate.HasValue ? order.OrderDate.Value.Year : 0,
+                        Month = order.OrderDate.HasValue ? order.OrderDate.Value.Month : 0,
+                        Day = order.OrderDate.HasValue ? order.OrderDate.Value.Day : 0,
+                        Quarter = order.OrderDate.HasValue ? (order.OrderDate.Value.Month - 1) / 3 + 1 : 0,
+                        MonthName = order.OrderDate.HasValue ? order.OrderDate.Value.ToString("MMMM") : "Mes no disponible",
+                        DayName = order.OrderDate.HasValue ? order.OrderDate.Value.DayOfWeek.ToString() : "Día no disponible",
+                    }).ToListAsync();
+
+                await _dwnorthwindContext.DimDates.AddRangeAsync(fechas);
+                await _dwnorthwindContext.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                resultado.Success = false;
+                resultado.Message = $"Error cargando la dimensión de fechas: {ex.Message}";
+            }
+
+            return resultado;
+        }
+
+        private async Task<OperationResult> LoadFactOrders()
+        {
+            var result = new OperationResult();
+
+            try
+            {
+                var orders = await _northwindContext.VwOrders.AsNoTracking().ToListAsync();
+                int[] orderIds = await _dwnorthwindContext.FactOrders.Select(o => o.OrderID).ToArrayAsync();
+
+                if (orderIds.Any())
+                {
+                    await _dwnorthwindContext.FactOrders
+                        .Where(o => orderIds.Contains(o.OrderID))
+                        .ExecuteDeleteAsync();
+                }
+
+                var customerCache = new Dictionary<string, DimCustomer>();
+                var employeeCache = new Dictionary<int, DimEmployee>();
+                var shipperCache = new Dictionary<int, DimShipper>();
+                var productCache = new Dictionary<int, DimProduct>();
+                var dateCache = new Dictionary<int, DimDate>();
+
+                var factOrders = new List<FactOrder>();
+
+                foreach (var order in orders)
+                {
+                    if (!customerCache.TryGetValue(order.CustomerID, out var customer))
+                    {
+                        customer = await _dwnorthwindContext.DimCustomers
+                            .FirstOrDefaultAsync(c => c.CustomerID == order.CustomerID);
+                        customerCache[order.CustomerID] = customer;
+                    }
+
+                    if (!employeeCache.TryGetValue(order.EmployeeID, out var employee))
+                    {
+                        employee = await _dwnorthwindContext.DimEmployees
+                            .FirstOrDefaultAsync(e => e.EmployeeID == order.EmployeeID);
+                        employeeCache[order.EmployeeID] = employee;
+                    }
+
+                    if (!shipperCache.TryGetValue(order.ShipperID, out var shipper))
+                    {
+                        shipper = await _dwnorthwindContext.DimShippers
+                            .FirstOrDefaultAsync(s => s.ShipperID == order.ShipperID);
+                        shipperCache[order.ShipperID] = shipper;
+                    }
+
+                    if (!productCache.TryGetValue(order.ProductID, out var product))
+                    {
+                        product = await _dwnorthwindContext.DimProducts
+                            .FirstOrDefaultAsync(p => p.ProductID == order.ProductID);
+                        productCache[order.ProductID] = product;
+                    }
+
+                    if (!dateCache.TryGetValue(order.DateKey ?? 0, out var date) && order.DateKey.HasValue)
+                    {
+                        date = await _dwnorthwindContext.DimDates
+                            .FirstOrDefaultAsync(d => d.DateKey == order.DateKey);
+                        dateCache[order.DateKey.Value] = date;
+                    }
+
+                    if (customer != null && employee != null && shipper != null && product != null && date != null)
+                    {
+                        var factOrder = new FactOrder
+                        {
+                            OrderID = order.OrderID,
+                            CustomerKey = customer.CustomerKey,
+                            EmployeeKey = employee.EmployeeKey,
+                            ShipperKey = shipper.ShipperKey,
+                            ProductKey = product.ProductKey,
+                            DateKey = date.DateKey,
+                            Country = order.Country,
+                            TotalVentas = Convert.ToDecimal(order.TotalVentas ?? 0),
+                            CantidadVentas = order.Cantidad.HasValue ? order.Cantidad.Value : 0
+                        };
+
+                        factOrders.Add(factOrder);
+                    }
+                }
+
+                await _dwnorthwindContext.FactOrders.AddRangeAsync(factOrders);
+                await _dwnorthwindContext.SaveChangesAsync();
+
+                result.Success = true;
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.Message = $"Error loading fact orders: {ex.Message}";
+                if (ex.InnerException != null)
+                {
+                    result.Message += $" Inner exception: {ex.InnerException.Message}";
+                }
+            }
+
+            return result;
+        }
 
 
-        //        int[] ordersId = await _dwnorthwindContext.FactOrders.Select(cd => cd.OrderNumber).ToArrayAsync();
+        private async Task<OperationResult> LoadFactCustomerServed()
+        {
+            OperationResult result = new OperationResult() { Success = true };
 
-        //        if (ordersId.Any())
-        //        {
-        //            await _dwnorthwindContext.FactOrders.Where(cd => ordersId.Contains(cd.OrderNumber))
-        //                                          .AsNoTracking()
-        //                                          .ExecuteDeleteAsync();
-        //        }
+            try
+            {
+                // Materializa los datos de las consultas antes de comenzar el bucle
+                var customerServeds = await _northwindContext.VwCustomersServed.AsNoTracking().ToListAsync();
 
-        //        foreach (var venta in ventas)
-        //        {
-        //            var customer = await _dwnorthwindContext.DimCustomers.SingleOrDefaultAsync(cust => cust.CustomerId == venta.CustomerId);
-        //            var employee = await _dwnorthwindContext.DimEmployees.SingleOrDefaultAsync(emp => emp.EmployeeId == venta.EmployeeId);
-        //            var shipper = await _dwnorthwindContext.DimShippers.SingleOrDefaultAsync(ship => ship.ShipperId == venta.ShipperId);
-        //            var product = await _dwnorthwindContext.DimProductCategories.SingleOrDefaultAsync(pro => pro.ProductId == venta.ProductId);
-
-        //            FactOrder factOrder = new FactOrder()
-        //            {
-        //                CantidadVentas = venta.Cantidad.Value,
-        //                Country = venta.Country,
-        //                CustomerKey = customer.CustomerKey,
-        //                EmployeeKey = employee.EmployeeKey,
-        //                DateKey = venta.DateKey.Value,
-        //                ProductKey = product.ProductKey,
-        //                Shipper = shipper.ShipperKey,
-        //                TotalVentas = Convert.ToDecimal(venta.TotalVentas)
-        //            };
-
-        //            await _dwnorthwindContext.FactOrders.AddAsync(factOrder);
-
-        //            await _dwnorthwindContext.SaveChangesAsync();
-        //        }
+                int[] customerIds = await _dwnorthwindContext.FactCustomersServed.Select(cli => cli.IDclientesatendidos).ToArrayAsync();
 
 
 
-        //        result.Success = true;
-        //    }
-        //    catch (Exception ex)
-        //    {
+                // Lista para almacenar las nuevas entidades a agregar
+                List<FactCustomerServed> factCustomerServeds = new List<FactCustomerServed>();
 
-        //        result.Success = false;
-        //        result.Message = $"Error cargando el fact de ventas {ex.Message} ";
-        //    }
+                foreach (var customer in customerServeds)
+                {
+                    var employee = await _dwnorthwindContext.DimEmployees
+                                                            .AsNoTracking()
+                                                            .SingleOrDefaultAsync(emp => emp.EmployeeID == customer.EmployeeID);
 
-        //    return result;
-        //}
+                    if (employee != null)
+                    {
+                        FactCustomerServed factClienteAtendido = new FactCustomerServed()
+                        {
+                            EmployeeKey = employee.EmployeeKey,
+                            NombreEmpleado = employee.EmployeeName,
+                            TotalClientesAtendidos = customer.NumeroClientes,
+                        };
 
-        //private async Task<OperationResult> LoadFactCustomerServed()
-        //{
-        //    OperationResult result = new OperationResult() { Success = true };
+                        factCustomerServeds.Add(factClienteAtendido);
+                    }
+                }
 
-        //    try
-        //    {
-        //        var customerServeds = await _northwindContext.VwServedCustomers.AsNoTracking().ToListAsync();
+                // Agrega todas las nuevas entidades a la vez
+                await _dwnorthwindContext.FactCustomersServed.AddRangeAsync(factCustomerServeds);
 
-        //        int[] customerIds = _dwnorthwindContext.FactClienteAtendidos.Select(cli => cli.ClienteAtendidoId).ToArray();
+                // Guarda los cambios una sola vez
+                await _dwnorthwindContext.SaveChangesAsync();
 
-        //        //Limpiamos la tabla de facts //
+                result.Success = true;
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.Message = $"Error cargando el fact de clientes atendidos {ex.Message} ";
+            }
 
-        //        if (customerIds.Any())
-        //        {
-        //            await _dwnorthwindContext.FactClienteAtendidos.Where(fact => customerIds.Contains(fact.ClienteAtendidoId))
-        //                                                    .AsNoTracking()
-        //                                                    .ExecuteDeleteAsync();
-        //        }
-
-        //        //Carga el fact de clientes atendidos. //
-        //        foreach (var customer in customerServeds)
-        //        {
-        //            var employee = await _dwnorthwindContext.DimEmployees
-        //                                              .SingleOrDefaultAsync(emp => emp.EmployeeId ==
-        //                                                                       customer.EmployeeId);
-
-
-        //            FactClienteAtendido factClienteAtendido = new FactClienteAtendido()
-        //            {
-        //                EmployeeKey = employee.EmployeeKey,
-        //                TotalClientes = customer.TotalCustomersServed
-        //            };
-
-
-        //            await _dwnorthwindContext.FactClienteAtendidos.AddAsync(factClienteAtendido);
-
-        //            await _dwnorthwindContext.SaveChangesAsync();
-        //        }
-
-        //        result.Success = true;
-
-        //    }
-        //    catch (Exception ex)
-        //    {
-
-        //        result.Success = false;
-        //        result.Message = $"Error cargando el fact de clientes atendidos {ex.Message} ";
-        //    }
-        //return result;
+            return result;
+        }
     }
-    }
+}
 

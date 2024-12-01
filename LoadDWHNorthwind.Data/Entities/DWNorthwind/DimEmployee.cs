@@ -13,7 +13,7 @@ namespace LoadDWHNorthwind.Data.Entities.DWNorthwind
         public int EmployeeID { get; set; }
         public string? EmployeeName { get; set; }
         public string? EmployeeTitle { get; set; }
-        public string? EmployeeRegion { get; set; }
+
 
     }
 }
