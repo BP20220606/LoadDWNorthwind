@@ -14,6 +14,7 @@ namespace LoadDWHNorthwind.Data.Entities.DWNorthwind
     {
         [Key]
         public int DateKey { get; set; }
+
         public DateTime Date { get; set; }
         public int Year { get; set; }
         public int Month { get; set; }

@@ -206,26 +206,34 @@ namespace LoadDWHNorthwind.Data.Services
             return result;
         }
 
-        private async Task<OperationResult> LoadDimDates()
-         {
+        public async Task<OperationResult> LoadDimDates()
+        {
             var resultado = new OperationResult { Success = true };
 
             try
             {
-               
-                var fechas = await _northwindContext.Orders.AsNoTracking()
-                    .Select(order => new DimDate
-                    {
-                        
-                        Date = order.OrderDate ?? DateTime.MinValue,
-                        Year = order.OrderDate.HasValue ? order.OrderDate.Value.Year : 0,
-                        Month = order.OrderDate.HasValue ? order.OrderDate.Value.Month : 0,
-                        Day = order.OrderDate.HasValue ? order.OrderDate.Value.Day : 0,
-                        Quarter = order.OrderDate.HasValue ? (order.OrderDate.Value.Month - 1) / 3 + 1 : 0,
-                        MonthName = order.OrderDate.HasValue ? order.OrderDate.Value.ToString("MMMM") : "Mes no disponible",
-                        DayName = order.OrderDate.HasValue ? order.OrderDate.Value.DayOfWeek.ToString() : "Día no disponible",
-                    }).ToListAsync();
+                // Obtener todas las fechas únicas de los pedidos sin necesidad de un ciclo innecesario
+                var orderDates = await _northwindContext.Orders
+                    .AsNoTracking()
+                    .Where(o => o.OrderDate.HasValue)
+                    .Select(o => o.OrderDate.Value.Date) // Solo las fechas, sin horas
+                    .Distinct()  // Solo fechas únicas
+                    .ToListAsync();
 
+                // Crear las entradas para DimDate en una sola acción sin foreach
+                var fechas = orderDates.Select(orderDate => new DimDate
+                {
+                    DateKey = orderDate.Year * 10000 + orderDate.Month * 100 + orderDate.Day, // Calcular DateKey manualmente
+                    Date = orderDate,
+                    Year = orderDate.Year,
+                    Month = orderDate.Month,
+                    Day = orderDate.Day,
+                    Quarter = (orderDate.Month - 1) / 3 + 1, // Calcula el trimestre
+                    MonthName = orderDate.ToString("MMMM"),
+                    DayName = orderDate.DayOfWeek.ToString(),
+                }).ToList();
+
+                // Insertar las fechas generadas en la tabla DimDates de una sola vez
                 await _dwnorthwindContext.DimDates.AddRangeAsync(fechas);
                 await _dwnorthwindContext.SaveChangesAsync();
             }
@@ -244,26 +252,27 @@ namespace LoadDWHNorthwind.Data.Services
 
             try
             {
+                // Obtener las órdenes desde la vista
                 var orders = await _northwindContext.VwOrders.AsNoTracking().ToListAsync();
+
+                // Obtener los IDs de las órdenes ya existentes en la tabla FactOrders para evitar duplicados
                 int[] orderIds = await _dwnorthwindContext.FactOrders.Select(o => o.OrderID).ToArrayAsync();
 
-                if (orderIds.Any())
-                {
-                    await _dwnorthwindContext.FactOrders
-                        .Where(o => orderIds.Contains(o.OrderID))
-                        .ExecuteDeleteAsync();
-                }
 
+                // Diccionarios de cache para evitar consultas repetidas
                 var customerCache = new Dictionary<string, DimCustomer>();
                 var employeeCache = new Dictionary<int, DimEmployee>();
                 var shipperCache = new Dictionary<int, DimShipper>();
                 var productCache = new Dictionary<int, DimProduct>();
                 var dateCache = new Dictionary<int, DimDate>();
 
+                // Lista para almacenar los registros de FactOrder a insertar
                 var factOrders = new List<FactOrder>();
 
+                // Recorrer todas las órdenes y agregar a la lista de factOrders
                 foreach (var order in orders)
                 {
+                    // Obtener o cargar las dimensiones necesarias, usando el cache
                     if (!customerCache.TryGetValue(order.CustomerID, out var customer))
                     {
                         customer = await _dwnorthwindContext.DimCustomers
@@ -299,6 +308,7 @@ namespace LoadDWHNorthwind.Data.Services
                         dateCache[order.DateKey.Value] = date;
                     }
 
+                    // Verificar que todas las dimensiones existan antes de agregar el FactOrder
                     if (customer != null && employee != null && shipper != null && product != null && date != null)
                     {
                         var factOrder = new FactOrder
@@ -318,8 +328,12 @@ namespace LoadDWHNorthwind.Data.Services
                     }
                 }
 
-                await _dwnorthwindContext.FactOrders.AddRangeAsync(factOrders);
-                await _dwnorthwindContext.SaveChangesAsync();
+                // Insertar todos los registros a la vez usando AddRangeAsync para eficiencia
+                if (factOrders.Any())
+                {
+                    await _dwnorthwindContext.FactOrders.AddRangeAsync(factOrders);
+                    await _dwnorthwindContext.SaveChangesAsync();
+                }
 
                 result.Success = true;
             }

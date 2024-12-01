@@ -9,6 +9,7 @@ namespace LoadDWHNorthwind.Data.Entities.DWNorthwind
     public class FactOrder
     {
         [Key]
+        public int FactOrderID { get; set; }
         public int OrderID { get; set; }
 
         public int DateKey { get; set; }
